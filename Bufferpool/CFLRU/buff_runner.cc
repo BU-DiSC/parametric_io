@@ -135,7 +135,43 @@ void Enqueue(EmuEnv* _env, Queue *queue, Hash *hash, unsigned pageId, bool isWri
   Buffer* buffer_instance = Buffer::getBufferInstance(_env);
   if (AreAllFramesFull(queue))
   {
-    if (algorithm == 1) // Classical LRU
+    ///**********************************************
+    // Only this part has been added for CFLRU
+    QNode *iterator_tail = queue->rear;
+    int counter = 0;
+    while (counter < _env->buffer_size_in_pages / _env->window) // Sending the least recent clean page of the window to the rear of the queue. (To use the 'dequeue' method)
+    {
+      if (!iterator_tail->dirty)
+      {
+        if (iterator_tail->next)
+          iterator_tail->next->prev = iterator_tail->prev;
+        else
+          break;
+        
+        if (iterator_tail->prev)
+          iterator_tail->prev->next = iterator_tail->next;
+
+        iterator_tail->prev = queue->rear;
+        iterator_tail->next = NULL;
+        iterator_tail->prev->next = iterator_tail;
+
+        queue->rear = iterator_tail;
+        break;
+      }
+      else
+      {
+        if (iterator_tail->prev)
+          iterator_tail = iterator_tail->prev;
+        else
+          break;
+      }
+      counter++;
+    }
+    // Only this part has been added for CFLRU
+    ///**********************************************
+
+  
+    if (algorithm == 1) // Classical CFLRU
     {
       // remove page from hash
       hash->array[queue->rear->pageId] = NULL;
@@ -162,10 +198,10 @@ void Enqueue(EmuEnv* _env, Queue *queue, Hash *hash, unsigned pageId, bool isWri
         QNode *moving_tail = tempq->rear->prev;
         QNode *temp_node;
         int flag = 0;
-        int window = 1;
+        int alpha_window = 1;
         int eligible_for_eviction_count = 1;
 
-        while (window < _env->concurrency)    // Sending all the dirty pages of the window to the rear of the queue. (To use the 'dequeue' method)
+        while (alpha_window < _env->concurrency)    // Sending all the dirty pages of the alpha_window to the rear of the queue. (To use the 'dequeue' method)
         {
           if (moving_tail->dirty)
           {
@@ -203,7 +239,7 @@ void Enqueue(EmuEnv* _env, Queue *queue, Hash *hash, unsigned pageId, bool isWri
             else
               break;
           }
-          window++;
+          alpha_window++;
         }
         queue = tempq;
         
@@ -239,7 +275,7 @@ void Enqueue(EmuEnv* _env, Queue *queue, Hash *hash, unsigned pageId, bool isWri
         int flag = 0;
         int eligible_for_eviction_count = 1;
 
-        while (eligible_for_eviction_count < _env->concurrency) // Sending all the dirty pages in the window to the rear of the queue. (To use the 'dequeue' method)
+        while (eligible_for_eviction_count < _env->concurrency) // Sending all the dirty pages in the alpha_window to the rear of the queue. (To use the 'dequeue' method)
         {
           if (moving_tail->dirty)
           {
@@ -310,11 +346,11 @@ void Enqueue(EmuEnv* _env, Queue *queue, Hash *hash, unsigned pageId, bool isWri
           cout << "Write IO: " << Buffer::write_io << endl;
 
         QNode *moving_tail = queue->rear->prev;
-        int window = 1;
+        int alpha_window = 1;
         int eligible_for_write_count = 1;
         Buffer::pages[0] = queue->rear->pageId;
       
-        while (window < _env->concurrency)    
+        while (alpha_window < _env->concurrency)    
         {
           if (moving_tail->dirty)
           {
@@ -327,7 +363,7 @@ void Enqueue(EmuEnv* _env, Queue *queue, Hash *hash, unsigned pageId, bool isWri
             moving_tail = moving_tail->prev;
           else
             break;
-          window++;
+          alpha_window++;
         }
 
         if (_env->verbosity == 2)
@@ -335,6 +371,7 @@ void Enqueue(EmuEnv* _env, Queue *queue, Hash *hash, unsigned pageId, bool isWri
         Buffer::write_lat += doKWrite(_env, eligible_for_write_count);
         Buffer::write_count += eligible_for_write_count;
       }
+      
       deQueue(queue);
     }
 
@@ -633,8 +670,7 @@ int Buffer::printStats()
   cout << "Read Cost: " << read_io * _env->read_cost << endl;
   cout << "Write Cost: " << write_io * _env->write_cost << endl;
   cout << "Total Cost: " << read_io * _env->read_cost + write_io * _env->write_cost << endl;
-  cout << "Read Lat (ms): " << read_lat/1000 << endl;
-  cout << "Write Lat (ms): " << write_lat/1000 << endl;
+  cout << "Execution Time (ms): " << read_lat/1000 + write_lat/1000 << endl;
   //cout << "Global Clock: " << clock << endl;
   cout << "******************************************************" << endl;
 
